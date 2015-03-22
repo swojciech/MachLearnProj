@@ -1,0 +1,94 @@
+Weight Lifting Form Prediction using the Weight Lifting Exercises Dataset
+========================================================
+
+## Overview
+
+A data set featuring movement data obtained through activity monitors is analyzed and used to predict weight lifting form on a particular dumbbell exercise performed by six individuals (i.e., qualitative activity recognition).  The data set is cleaned in various ways, and then boosted models are built for exercise form prediction.  Using cross-validation with these models, the out-of-sample error is estimated at approximately 5 percent.
+
+## Preliminary Analysis and Processing
+
+The training data set is read in, and it is seen that each of the five classes for exercise form (A through E, with A signifying correct form and B through E each signifying a particular error in form) are well represented; this balance is beneficial for this analysis on the whole.
+
+Variables including "kurtosis," "skewness," "max," "min," "amplitude," "var," "avg," and "stddev" are removed from the data set based on missing values, "div/0"" values, and the transformed nature of these variables. Index and identifier variables are removed as well.  Variables showing near zero variance are searched for for removal, as such variables do not contain much predictive power, but none remain after previous cleaning. For purposes of increased model accuracy, Variables are also removed from the data set based on high absolute correlations, in this instance those of 0.75 or higher.
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+library(caret) ## For model training
+
+## Read in training data
+setwd("C:/Users/swojciechowski/Desktop/CourseraMachineLearning/MachLearnProj")
+trainDf <- read.csv("pml-training.csv")
+## trainDf <- read.csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+
+## Counts of exercise form observations, by form class
+table(trainDf$classe)
+
+## Set pattern for column name searching to later remove kurtosis, skewness, max_, min_, amplitude, var, avg, and stddev variables and data
+pattern <- "kurtosis_|skewness_|max_|min_|amplitude_|var_|avg_|stddev"
+
+## Remove kurtosis, skewness, max, min, amplitude, var, avg, and stddev variables and data
+trainDfFiltered <- trainDf[, -(grep(pattern, names(trainDf), ignore.case = TRUE))]
+
+## Remove index variables and indenifiers
+trainDfFiltered <- trainDfFiltered[, -c(1:7)]
+
+## Check for near zero Variance
+nzvNoMet <- nearZeroVar(trainDfFiltered, saveMetrics = FALSE)
+nzvNoMet
+
+## Check for correlated predictors and remove from data set
+
+trainDfFilteredCorr <- cor(trainDfFiltered[, -53]) ## Column 53 is classe variable
+highCorr <- findCorrelation(trainDfFilteredCorr, 0.75)
+trainDfFiltered <- trainDfFiltered[, -highCorr]
+```
+
+## Prediction Models
+
+A boosted model is built and trained, with the results then considered.  The boosted model was chosen due to the classification nature of the problem and the model's high performance, as well as processing power and time considerations.
+
+The results from the trained model indicate that three variables have zero influence on the model, so the relative importance of the variables included in the model is plotted.  A new data set is then built with the three variables having no importance removed, and a second boosted model is then trained on that reduced data set.
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+## Build boosted model using training data
+set.seed(1910)
+modFitBoost2 <- train(classe ~ ., data = trainDfFiltered, method = "gbm", verbose = FALSE, 
+                trControl = trainControl(method = "CV", number = 3))
+
+## First model results
+modFitBoost2
+modFitBoost2$finalModel
+modFitBoost2$resample
+
+## Determine and plot first model variable importance
+ImpBoost2 <- varImp(modFitBoost2)
+plot(ImpBoost2)
+
+## Build new data set with zero importance variables removed
+trainDfFilteredBoost <- subset(trainDfFiltered, select=-c(12, 20, 26))
+
+## Build new boosted model using training data and new data set with zero importance 
+## variables removed
+set.seed(1910)
+modFitBoost3 <- train(classe ~ ., data = trainDfFilteredBoost, method = "gbm", 
+                verbose = FALSE, trControl = trainControl(method = "CV", number = 3))
+```
+
+## Out-of-Sample Error Estimates
+
+In order to obtain estimates of out-of-sample error and gauge how well the model will perform on an unseen data set, 3-fold cross-validation is used from within the train() and trainControl() functions featured in the R Caret package. This choice was made based on the robustness of the technique as well as train-time considerations given the size of the training data set.
+
+The model output for the second model, as well as plots of accuracy and kappa for both models are featured below.  It is seen from this that the out-of-sample error estimates indicated by the models are approximately 5 percent, with the second model performing somewhat better than the first.
+
+```{r, echo=TRUE, warning=FALSE, message=FALSE}
+
+## Second model results
+modFitBoost3
+modFitBoost3$finalModel
+modFitBoost3$resample
+
+## Collect results
+results <- resamples(list(Boost2=modFitBoost2, Boost3=modFitBoost3))
+
+## Boxplots of results
+bwplot(results)
+```
